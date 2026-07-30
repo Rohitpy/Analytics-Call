@@ -1,0 +1,40 @@
+# ============================================================================
+# Theme Analytics - Python 3.13
+#
+# Everything here is already present in the target environment (versions in
+# the comments are the ones verified there). Deliberately NOT used, so that
+# nothing new has to be installed:
+#   sse-starlette -> SSE is done with a plain StreamingResponse
+#   tenacity      -> retry/backoff is hand-rolled in services/llm_client.py
+#   pandas        -> openpyxl alone writes the report
+# ============================================================================
+
+# ---- API / web layer -------------------------------------------------------
+fastapi>=0.115.0            # verified: 0.139.0
+uvicorn[standard]>=0.30.0   # verified: 0.51.0
+python-multipart>=0.0.9     # verified: 0.0.32  (multipart upload support)
+pydantic>=2.7.0
+pydantic-settings>=2.3.0    # verified: 2.14.2
+aiofiles>=23.0.0            # verified: 25.1.0  (streaming upload writes)
+
+# ---- config / prompts ------------------------------------------------------
+# YAML is read through backend/core/yaml_compat.py, which accepts EITHER
+# PyYAML or ruamel.yaml (verified: ruamel.yaml 0.17.21). Install neither and
+# the app still boots - it just cannot read the taxonomy file.
+PyYAML>=6.0 ; python_version >= "3.9"
+
+# ---- LLM client ------------------------------------------------------------
+openai>=1.40.0              # verified: 2.45.0  (AsyncOpenAI, vLLM-compatible)
+
+# ---- reporting -------------------------------------------------------------
+openpyxl>=3.1.2             # verified: 3.1.5
+
+# ---- STT stack -------------------------------------------------------------
+# GPU box only. On a laptop set STT_BACKEND=mock and none of these are
+# imported (transcription.py imports them lazily, inside the backend class).
+numpy>=1.26.0
+librosa>=0.11.0             # verified: 0.11.0
+soundfile>=0.12.1
+torch>=2.3.0
+openai-whisper>=20231117    # verified: 20250625
+silero-vad>=5.1             # verified: 6.2.1

@@ -1,0 +1,662 @@
+# ============================================================================
+# Theme taxonomy
+# ----------------------------------------------------------------------------
+# This file IS the prompt. Everything below is rendered into the classification
+# prompt at request time (see services/prompt_builder.py), so editing this file
+# changes the model's behaviour with no code change and no restart - hit
+# POST /api/v1/themes/reload afterwards.
+#
+# Structure:
+#   themes[]                 a broad category. Keep these few and stable.
+#     .name                  EXACT string that lands in the Excel "Theme" column
+#     .description           when to pick this theme (and when not to)
+#     .keywords              surface cues; help the model disambiguate
+#     .issues[]              the specific problem inside the theme
+#       .name                EXACT string for the "Specific Issue" column
+#       .description         one line on what this issue means
+#       .reasons[]           candidate root causes -> the model picks/adapts one
+#       .examples[]          short paraphrased call snippets. THE HIGHEST-VALUE
+#                            FIELD - two or three concrete ones beat any amount
+#                            of abstract description.
+#
+# Guidance for editing:
+#   - Keep issue names short, noun-phrased and mutually exclusive.
+#   - Every theme should have an "Other <theme> issue" escape hatch so the
+#     model is never forced into a wrong specific issue.
+#   - The fallback theme at the bottom catches genuinely unclassifiable calls.
+# ============================================================================
+
+version: "1.0"
+domain: "Retail banking contact centre (Saudi Awwal Bank - SAB)"
+fallback_theme: "Others"
+fallback_issue: "Unclassified"
+
+themes:
+  # ------------------------------------------------------------------------
+  - name: "Cards"
+    description: >-
+      Anything about a physical or virtual debit, credit or prepaid card:
+      issuance, delivery, activation, PIN, limits, blocking, replacement and
+      declined card transactions. Use Fraud & Disputes instead when the
+      customer denies making the transaction.
+    keywords: [card, credit card, debit card, mada, visa, pin, cvv, activation, limit, declined]
+    issues:
+      - name: "Card not received"
+        description: Card was issued but never physically reached the customer.
+        reasons:
+          - "Delivery address on file is outdated or incomplete"
+          - "Courier attempted delivery and failed to reach the customer"
+          - "Card dispatch was delayed beyond the committed SLA"
+          - "Card was returned to the branch and not re-dispatched"
+        examples:
+          - "Customer applied for a credit card three weeks ago, says the app shows it as dispatched but nothing has arrived; agent finds the courier returned it to the branch."
+          - "Customer moved to a new city and the replacement debit card went to the old registered address."
+
+      - name: "Card activation failure"
+        description: Customer has the card but cannot activate it.
+        reasons:
+          - "Activation attempted from a number not registered with the bank"
+          - "Card record not yet released in the core banking system"
+          - "Customer entered incorrect identity verification details"
+          - "Activation channel (app/IVR) returned a technical error"
+        examples:
+          - "Customer keeps getting 'activation failed' in the mobile app; agent finds the mobile number on file belongs to a family member."
+          - "Card was collected from the branch this morning and the IVR says the card number is invalid."
+
+      - name: "Card blocked or suspended"
+        description: Card stopped working because the bank blocked it.
+        reasons:
+          - "Blocked by the fraud monitoring system after unusual activity"
+          - "Blocked after repeated incorrect PIN entries"
+          - "Blocked due to overdue payment or breached credit limit"
+          - "Customer or a joint holder requested the block earlier"
+        examples:
+          - "Card declined at a hotel abroad; agent explains the risk engine blocked it after a foreign merchant attempt."
+          - "Customer entered the wrong PIN three times at an ATM and the card is now locked."
+
+      - name: "PIN issue"
+        description: Forgotten, non-working, or resettable PIN.
+        reasons:
+          - "Customer forgot the PIN and needs a reset"
+          - "PIN mailer never received"
+          - "PIN change through the app or ATM did not take effect"
+        examples:
+          - "Customer forgot the debit card PIN and wants to set a new one over the phone."
+          - "Customer changed the PIN in the app yesterday but the ATM still rejects the new one."
+
+      - name: "Card transaction declined"
+        description: A legitimate purchase or withdrawal was refused.
+        reasons:
+          - "Insufficient available balance or credit limit"
+          - "International or online usage not enabled on the card"
+          - "Per-transaction or daily limit exceeded"
+          - "Merchant terminal or network error"
+        examples:
+          - "Online purchase from an international website keeps failing; e-commerce toggle is off in the app."
+          - "Customer tried to withdraw 10,000 SAR and the ATM refused - daily limit is 5,000."
+
+      - name: "Card limit or upgrade request"
+        description: Requests to change credit limit, tier, or card product.
+        reasons:
+          - "Customer wants a higher credit limit for a large purchase"
+          - "Customer wants to upgrade to a premium tier for benefits"
+          - "Customer wants to reduce the limit for budgeting or safety"
+        examples:
+          - "Customer asks to raise the credit limit before travelling."
+          - "Customer wants to move from a classic card to a signature card for lounge access."
+
+      - name: "Card cancellation or closure"
+        description: Customer wants to stop or close a card.
+        reasons:
+          - "Annual fee is considered too high"
+          - "Customer no longer uses the card"
+          - "Customer is moving to another bank"
+          - "Card was replaced by another product"
+        examples:
+          - "Customer saw the annual fee posted and wants the credit card closed immediately."
+
+      - name: "Other card issue"
+        description: Card-related but none of the above.
+        reasons: ["Does not match any predefined card issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Accounts and Onboarding"
+    description: >-
+      Opening, closing, maintaining and updating accounts and customer
+      profiles, KYC/ID refresh, statements, IBAN and balance enquiries about
+      the account itself.
+    keywords: [account, open account, close account, iban, statement, kyc, id expiry, salary account, dormant]
+    issues:
+      - name: "Account opening delay"
+        description: New account application is stuck or slower than promised.
+        reasons:
+          - "KYC documents incomplete or rejected"
+          - "Application pending compliance or risk review"
+          - "Technical failure in the digital onboarding journey"
+          - "Absher/Yakeen identity verification did not complete"
+        examples:
+          - "Customer applied through the app five days ago, still 'under review', agent finds the ID copy was unreadable."
+
+      - name: "Account frozen or dormant"
+        description: Customer cannot transact because the account is restricted.
+        reasons:
+          - "National ID or Iqama has expired and KYC needs refreshing"
+          - "Account went dormant after a long period of inactivity"
+          - "Restriction placed by compliance or a regulatory hold"
+        examples:
+          - "Salary did not credit; agent explains the Iqama on file expired last month and the account is frozen pending update."
+
+      - name: "Account closure request"
+        description: Customer wants to close an account.
+        reasons:
+          - "Customer is relocating or leaving the country"
+          - "Dissatisfied with fees or service"
+          - "Consolidating accounts with another bank"
+          - "Duplicate or unused account"
+        examples:
+          - "Expatriate customer is leaving the country next week and needs the account closed and the balance transferred."
+
+      - name: "Profile or contact detail update"
+        description: Change of mobile number, email, address or personal details.
+        reasons:
+          - "Customer changed mobile operator or number"
+          - "Address changed after relocation"
+          - "Name or ID details corrected after a document renewal"
+        examples:
+          - "Customer is not receiving OTPs because the registered mobile number is an old one."
+
+      - name: "Statement or document request"
+        description: Requests for statements, certificates, or letters.
+        reasons:
+          - "Customer needs a statement for a visa or embassy application"
+          - "Customer needs a salary or balance certificate for a loan"
+          - "Statement not received by email as expected"
+        examples:
+          - "Customer needs a six-month stamped statement for a Schengen visa appointment."
+
+      - name: "Balance or transaction enquiry"
+        description: Questions about balance, or an unrecognised-but-legitimate entry.
+        reasons:
+          - "Customer cannot reconcile the balance with recent activity"
+          - "A pending authorisation is being counted against the balance"
+          - "Customer wants a breakdown of recent debits"
+        examples:
+          - "Customer says 500 SAR is missing; agent shows a pending hold from a car rental."
+
+      - name: "Other account issue"
+        description: Account-related but none of the above.
+        reasons: ["Does not match any predefined account issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Digital Banking"
+    description: >-
+      The mobile app, internet banking and IVR as channels: login, OTP,
+      registration, app errors, crashes, features not working. If the failure
+      is specifically a transfer that did not go through, use Transfers and
+      Payments.
+    keywords: [app, mobile banking, internet banking, login, password, otp, sms code, update app, error message, crash]
+    issues:
+      - name: "Login or password failure"
+        description: Customer cannot get into the app or internet banking.
+        reasons:
+          - "Password forgotten or expired"
+          - "Profile locked after repeated failed login attempts"
+          - "Username or customer ID not remembered"
+          - "Device change requires re-registration"
+        examples:
+          - "Customer tried the password four times, is now locked out and needs a reset."
+          - "Customer bought a new phone and the app will not let the profile be restored."
+
+      - name: "OTP not received"
+        description: One-time password never arrives or arrives too late.
+        reasons:
+          - "Registered mobile number is outdated"
+          - "Network or SMS gateway delay"
+          - "Customer is roaming abroad and not receiving local SMS"
+          - "OTP messages blocked or filtered on the handset"
+        examples:
+          - "Customer is travelling in Egypt and no OTP arrives, so the transfer cannot be completed."
+
+      - name: "App error or crash"
+        description: The application misbehaves technically.
+        reasons:
+          - "App version is outdated and unsupported"
+          - "Backend service outage or maintenance window"
+          - "Device compatibility or storage problem"
+          - "Corrupted app cache after an update"
+        examples:
+          - "App shows 'service temporarily unavailable' every time the customer opens the accounts tab."
+
+      - name: "Registration or activation on digital channel"
+        description: Cannot enrol into the digital channel at all.
+        reasons:
+          - "Customer details do not match the bank's records"
+          - "Card or account required for enrolment is not active"
+          - "Verification step fails repeatedly"
+        examples:
+          - "New customer cannot complete app registration because the system rejects the ID number."
+
+      - name: "Feature not working or not available"
+        description: A specific function inside the channel fails or is missing.
+        reasons:
+          - "Feature not enabled for the customer's product or segment"
+          - "Known defect in the current release"
+          - "Customer is looking for a feature that only exists in another channel"
+        examples:
+          - "Customer cannot find the standing-order option in the new app version."
+
+      - name: "Other digital banking issue"
+        description: Channel-related but none of the above.
+        reasons: ["Does not match any predefined digital banking issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Transfers and Payments"
+    description: >-
+      Movement of money: local and international transfers, SARIE, SWIFT,
+      IPS/instant transfers, bill payments, SADAD, standing orders, salary
+      credits and beneficiary management.
+    keywords: [transfer, sarie, swift, iban, beneficiary, sadad, bill payment, remittance, standing order, salary]
+    issues:
+      - name: "Transfer failed or rejected"
+        description: The transfer did not execute.
+        reasons:
+          - "Beneficiary IBAN or account details are incorrect"
+          - "Insufficient balance including fees"
+          - "Transfer limit for the channel exceeded"
+          - "Compliance or sanctions screening held the payment"
+        examples:
+          - "Transfer to a beneficiary in Jordan was rejected; agent finds the IBAN has a wrong check digit."
+
+      - name: "Transfer delayed or not credited"
+        description: Money left the account but has not reached the beneficiary.
+        reasons:
+          - "Correspondent or beneficiary bank processing delay"
+          - "Transfer sent outside cut-off time or on a non-working day"
+          - "Payment under additional compliance review"
+          - "Beneficiary bank returned the funds"
+        examples:
+          - "International transfer sent four days ago has still not been credited in India; agent raises a SWIFT trace."
+
+      - name: "Amount debited but transaction not completed"
+        description: Account debited while the payment or withdrawal failed.
+        reasons:
+          - "System timeout during processing; auto-reversal pending"
+          - "Merchant or biller did not confirm the payment"
+          - "Duplicate debit for a single instruction"
+        examples:
+          - "Customer paid an electricity bill through SADAD, amount was deducted twice but the bill still shows unpaid."
+
+      - name: "Beneficiary addition problem"
+        description: Cannot add, verify or activate a beneficiary.
+        reasons:
+          - "Beneficiary activation cooling period not elapsed"
+          - "Beneficiary details rejected as invalid"
+          - "OTP or verification step failed during addition"
+        examples:
+          - "Customer added a new beneficiary but must wait before the first transfer and was not told."
+
+      - name: "Bill payment issue"
+        description: Problems paying a biller or government service.
+        reasons:
+          - "Incorrect SADAD or biller reference number"
+          - "Biller has not updated the payment status"
+          - "Payment posted to the wrong invoice"
+        examples:
+          - "Traffic fine paid but still showing as outstanding on the government portal."
+
+      - name: "Salary or incoming credit not received"
+        description: Expected inbound money has not arrived.
+        reasons:
+          - "Employer has not released the payroll file"
+          - "Account restriction blocked the credit"
+          - "Funds credited to a different account of the same customer"
+        examples:
+          - "Customer says colleagues received salary yesterday and theirs has not landed."
+
+      - name: "Other transfers and payments issue"
+        description: Payments-related but none of the above.
+        reasons: ["Does not match any predefined payments issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Loans and Finance"
+    description: >-
+      Personal finance, auto finance, mortgage, credit card instalment plans:
+      applications, eligibility, instalments, early settlement, rescheduling
+      and liability letters.
+    keywords: [loan, finance, murabaha, instalment, tenor, settlement, mortgage, auto finance, eligibility, deduction]
+    issues:
+      - name: "Loan application status or delay"
+        description: Application submitted, decision pending or slow.
+        reasons:
+          - "Documents pending from the customer or the employer"
+          - "Credit bureau (SIMAH) check still in progress"
+          - "Application queued for credit committee approval"
+        examples:
+          - "Customer applied for personal finance ten days ago and has heard nothing."
+
+      - name: "Loan rejection or eligibility"
+        description: Application declined, or customer asks why they do not qualify.
+        reasons:
+          - "Debt burden ratio exceeds the regulatory ceiling"
+          - "Insufficient length of service or salary transfer history"
+          - "Adverse credit bureau record"
+        examples:
+          - "Customer wants to know why the auto finance was rejected despite a good salary."
+
+      - name: "Instalment or deduction problem"
+        description: Instalment amount, date or deduction is wrong.
+        reasons:
+          - "Instalment deducted twice in the same month"
+          - "Deduction taken before the salary credit, causing an overdraft"
+          - "Instalment amount differs from the signed agreement"
+        examples:
+          - "Two instalments were deducted this month and the customer wants one refunded."
+
+      - name: "Early settlement or payoff request"
+        description: Customer wants to close the finance early.
+        reasons:
+          - "Customer received a lump sum and wants to settle"
+          - "Customer is refinancing with another bank"
+          - "Customer is leaving the country"
+        examples:
+          - "Customer asks for an early settlement quotation and disputes the profit calculation."
+
+      - name: "Rescheduling or deferment request"
+        description: Customer wants to postpone or restructure payments.
+        reasons:
+          - "Temporary financial hardship or job loss"
+          - "Request to extend tenor and reduce the monthly instalment"
+          - "Requesting a payment holiday"
+        examples:
+          - "Customer lost their job and asks to defer the next three instalments."
+
+      - name: "Other loans and finance issue"
+        description: Finance-related but none of the above.
+        reasons: ["Does not match any predefined finance issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Fraud and Disputes"
+    description: >-
+      Use this whenever the customer DENIES a transaction, reports a scam,
+      phishing, account takeover, or formally disputes a charge with a
+      merchant. Takes precedence over Cards and Transfers when the customer
+      says the activity was not theirs.
+    keywords: [fraud, unauthorized, scam, phishing, dispute, chargeback, stolen, hacked, i did not do this, refund]
+    issues:
+      - name: "Unauthorized transaction reported"
+        description: Customer denies having made a debit or purchase.
+        reasons:
+          - "Card details compromised at a merchant or skimming device"
+          - "Customer shared OTP or credentials after a phishing call"
+          - "Card lost or stolen and used by a third party"
+          - "Family member used the card without permission"
+        examples:
+          - "Customer reports three online purchases they never made and wants the card blocked and the money back."
+          - "Customer received a call claiming to be from the bank, shared the OTP and 8,000 SAR was taken."
+
+      - name: "Merchant dispute or chargeback"
+        description: Transaction was made, but goods/services were not delivered as agreed.
+        reasons:
+          - "Goods or services never delivered"
+          - "Customer was charged twice by the merchant"
+          - "Cancelled booking not refunded by the merchant"
+          - "Amount charged differs from the amount agreed"
+        examples:
+          - "Airline cancelled the flight two months ago and has not refunded; customer wants a chargeback."
+
+      - name: "Account takeover or compromise"
+        description: Customer believes someone else has access to their banking.
+        reasons:
+          - "Credentials shared or phished"
+          - "Unrecognised device or login alert received"
+          - "SIM swap suspected"
+        examples:
+          - "Customer got a login alert from an unknown device and wants the profile suspended."
+
+      - name: "Dispute status follow-up"
+        description: A dispute already exists and the customer is chasing it.
+        reasons:
+          - "Investigation still within the regulatory timeline"
+          - "Provisional credit not yet applied"
+          - "Customer not informed of the outcome"
+        examples:
+          - "Customer raised a dispute three weeks ago and no one has called back."
+
+      - name: "Other fraud or dispute issue"
+        description: Fraud-related but none of the above.
+        reasons: ["Does not match any predefined fraud issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "ATM and Branch Services"
+    description: >-
+      Physical channels: ATM/CDM cash issues, machine faults, branch visits,
+      appointments, queues, cheque books and cash handling.
+    keywords: [atm, cash machine, cdm, deposit machine, branch, cheque, cheque book, appointment, queue, cash]
+    issues:
+      - name: "Cash not dispensed but account debited"
+        description: The classic ATM short-dispense.
+        reasons:
+          - "ATM ran out of cash mid-transaction"
+          - "Machine or network error before dispensing"
+          - "Partial dispense - fewer notes than requested"
+        examples:
+          - "Customer requested 2,000 SAR, the machine gave nothing but the SMS shows the debit."
+
+      - name: "Cash deposit not credited"
+        description: Money put into a CDM has not appeared.
+        reasons:
+          - "Deposit machine jam or note rejection"
+          - "Credit pending until physical reconciliation"
+          - "Deposit posted to the wrong account number"
+        examples:
+          - "Customer deposited 5,000 SAR into the CDM yesterday and the balance has not changed."
+
+      - name: "Card retained by ATM"
+        description: The machine swallowed the card.
+        reasons:
+          - "Card left in the slot beyond the timeout"
+          - "Machine fault during the transaction"
+          - "Card was flagged for capture"
+        examples:
+          - "ATM kept the card at a mall branch and the customer wants it back today."
+
+      - name: "Branch service complaint"
+        description: Dissatisfaction with an in-branch experience.
+        reasons:
+          - "Excessive waiting time"
+          - "Staff behaviour or attitude"
+          - "Branch closed or service unavailable on arrival"
+          - "Requested service refused at the counter"
+        examples:
+          - "Customer waited ninety minutes and was then told the service is only available online."
+
+      - name: "Cheque book or cheque issue"
+        description: Anything about cheques.
+        reasons:
+          - "Cheque book request not delivered"
+          - "Cheque returned or bounced"
+          - "Stop payment request on a cheque"
+        examples:
+          - "Customer needs a cheque book urgently for a rent payment."
+
+      - name: "Other ATM or branch issue"
+        description: Physical-channel related but none of the above.
+        reasons: ["Does not match any predefined ATM or branch issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Fees and Charges"
+    description: >-
+      Questions and complaints about money the bank itself took: fees,
+      commissions, profit rates, VAT and reversal requests. If the customer
+      denies the underlying transaction entirely, use Fraud and Disputes.
+    keywords: [fee, charge, commission, annual fee, vat, interest, profit rate, deducted, reverse, waiver]
+    issues:
+      - name: "Unexpected or unexplained charge"
+        description: A fee the customer does not recognise or understand.
+        reasons:
+          - "Fee applied per the schedule but never communicated clearly"
+          - "Annual or renewal fee posted on the anniversary"
+          - "Foreign exchange or cross-currency markup"
+          - "Charge applied in error"
+        examples:
+          - "Customer sees a 300 SAR charge and does not know what it is; agent identifies the credit card annual fee."
+
+      - name: "Fee reversal or waiver request"
+        description: Customer asks for the charge back.
+        reasons:
+          - "Customer claims the fee was not disclosed"
+          - "Long-standing customer requesting goodwill waiver"
+          - "Fee charged despite meeting the waiver criteria"
+        examples:
+          - "Customer maintains the minimum balance and still got the monthly fee - asks for reversal."
+
+      - name: "Profit or interest rate query"
+        description: Questions about the rate applied.
+        reasons:
+          - "Rate differs from what the customer expected"
+          - "Customer wants the calculation explained"
+          - "Promotional rate ended without notice"
+        examples:
+          - "Customer asks why the credit card profit charge is higher than last month."
+
+      - name: "Other fees and charges issue"
+        description: Charges-related but none of the above.
+        reasons: ["Does not match any predefined charges issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Customer Service Experience"
+    description: >-
+      The call is ABOUT the service itself rather than a banking product:
+      complaints about agents, repeated calls with no resolution, promised
+      callbacks that never came, escalations, and compliments. Only use this
+      when the service failure is the main subject of the call.
+    keywords: [complaint, escalate, supervisor, no callback, called many times, rude, promised, follow up, feedback]
+    issues:
+      - name: "Repeated contact without resolution"
+        description: Customer has called before about the same thing.
+        reasons:
+          - "Previous ticket closed without actually resolving the problem"
+          - "No ownership taken across contacts"
+          - "Customer given contradictory information each time"
+        examples:
+          - "Customer says this is the fifth call about the same failed transfer and nothing has changed."
+
+      - name: "Callback or SLA not honoured"
+        description: A promise about time was broken.
+        reasons:
+          - "Promised callback never made"
+          - "Case exceeded the committed turnaround time"
+          - "Customer not informed about the delay"
+        examples:
+          - "Agent promised a call within 24 hours four days ago."
+
+      - name: "Agent behaviour or misinformation"
+        description: Complaint about how staff handled the customer.
+        reasons:
+          - "Rude, dismissive or impatient handling"
+          - "Incorrect information given previously"
+          - "Call disconnected without a call back"
+        examples:
+          - "Customer says the previous agent hung up mid-sentence."
+
+      - name: "Escalation request"
+        description: Customer explicitly asks to go higher.
+        reasons:
+          - "Customer wants a supervisor or manager"
+          - "Customer threatens to escalate to the regulator (SAMA)"
+          - "Customer wants a formal complaint reference"
+        examples:
+          - "Customer demands a supervisor and says they will file with SAMA otherwise."
+
+      - name: "Positive feedback or appreciation"
+        description: Customer is happy and says so.
+        reasons:
+          - "Issue resolved quickly and the customer is thanking the team"
+          - "Customer praising a specific agent"
+        examples:
+          - "Customer calls back only to thank the agent who fixed the card block yesterday."
+
+      - name: "Other service experience issue"
+        description: Service-related but none of the above.
+        reasons: ["Does not match any predefined service issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "General Enquiry"
+    description: >-
+      Purely informational calls with no problem to solve: product features,
+      rates, requirements, working hours, branch locations, eligibility
+      questions. If anything is broken or the customer is unhappy, pick the
+      matching problem theme instead.
+    keywords: [how do i, what is, information, enquiry, requirements, working hours, documents needed, tell me about]
+    issues:
+      - name: "Product or service information request"
+        description: Customer asking what something is or how it works.
+        reasons:
+          - "Customer evaluating a product before applying"
+          - "Customer wants to know eligibility or required documents"
+          - "Customer comparing options"
+        examples:
+          - "Customer asks what documents are needed to open a business account."
+
+      - name: "Rates, limits or fees enquiry"
+        description: Asking for numbers, not disputing them.
+        reasons:
+          - "Customer wants current profit rates before deciding"
+          - "Customer asking about transfer limits"
+        examples:
+          - "Customer asks the daily ATM withdrawal limit before travelling."
+
+      - name: "Branch, ATM or working hours enquiry"
+        description: Logistics questions.
+        reasons:
+          - "Customer wants the nearest branch or its timings"
+          - "Customer asking about Ramadan or holiday hours"
+        examples:
+          - "Customer asks which branch is open on Friday evening."
+
+      - name: "Other general enquiry"
+        description: Informational but none of the above.
+        reasons: ["Does not match any predefined enquiry issue"]
+        examples: []
+
+  # ------------------------------------------------------------------------
+  - name: "Others"
+    description: >-
+      The escape hatch. Use ONLY when the transcript genuinely does not fit
+      any theme above, or when there is not enough content to judge - silent
+      calls, wrong numbers, test calls, or audio that produced no usable
+      speech. Do not use it just because the call touches two themes; in that
+      case pick the dominant one.
+    keywords: [silent, no speech, wrong number, test call, disconnected, unclear]
+    issues:
+      - name: "No usable speech in the call"
+        description: Silence, noise, or nothing transcribable.
+        reasons:
+          - "Call was silent or contained only hold music"
+          - "Audio quality too poor to transcribe"
+          - "Call dropped before any conversation"
+        examples:
+          - "Transcript is empty or contains only '[No speech detected]'."
+
+      - name: "Wrong number or non-banking call"
+        description: The call is not about the bank at all.
+        reasons:
+          - "Customer dialled the wrong number"
+          - "Internal or test call"
+        examples:
+          - "Caller was trying to reach a delivery company."
+
+      - name: "Unclassified"
+        description: Real conversation that does not map to any theme.
+        reasons:
+          - "Content does not match any theme in the taxonomy"
+        examples: []
