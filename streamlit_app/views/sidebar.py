@@ -26,8 +26,8 @@ def _readiness(api: ApiClient) -> None:
     except ApiError as exc:
         st.error(f"Backend unreachable\n\n{exc.message}")
         st.caption(
-            "Start it with `./run.sh --api-only`, or set THEME_ANALYTICS_API_URL "
-            "if it runs on another host."
+            "Start it with `python -m backend.main`, or set "
+            "THEME_ANALYTICS_API_URL if it runs on another host or port."
         )
         return
 

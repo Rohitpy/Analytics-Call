@@ -4,12 +4,16 @@
 
 Talks to the FastAPI backend over HTTP only. Point it elsewhere with
 THEME_ANALYTICS_API_URL if the API runs on another host.
+
+The page never reruns on a timer. Every rerun is something the user did -
+a button, a widget, or the browser's rerun shortcut. A timed rerun loop
+(time.sleep + st.rerun) also blocks the script thread, which makes Ctrl+C
+slow to take effect, so removing it keeps shutdown immediate.
 """
 
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import streamlit as st
@@ -46,7 +50,6 @@ def init_state() -> None:
         "selected_job": None,
         "selected_call": None,
         "uploader_generation": 0,
-        "auto_refresh": True,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -115,26 +118,13 @@ def main() -> None:
     with tabs[3]:
         taxonomy.render(api)
 
-    _auto_refresh(running)
-
-
-def _auto_refresh(running: bool) -> None:
-    """Streamlit has no push channel, so 'live' progress is a timed rerun.
-
-    Only while the batch is running, and only if the user leaves it on -
-    a rerun re-fetches the job and the results, so it is not free.
-    """
-    if not running:
-        return
-
-    st.divider()
-    st.checkbox(
-        f"Auto-refresh every {SETTINGS.poll_seconds:g}s while running",
-        key="auto_refresh",
-    )
-    if st.session_state.get("auto_refresh"):
-        time.sleep(SETTINGS.poll_seconds)
-        st.rerun()
+    if running:
+        st.divider()
+        st.info(
+            "This batch is still processing. The page does not refresh on its "
+            "own - press **R**, or use the Refresh button above, to see the "
+            "latest progress."
+        )
 
 
 main()

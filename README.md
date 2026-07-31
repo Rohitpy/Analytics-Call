@@ -108,23 +108,33 @@ LLM_BASE_URL=http://localhost:8003/v1
 LLM_MODEL=gemma-4
 ```
 
-Run it — this starts **two** processes, the API and the Streamlit UI:
+Run it. These are **two independent processes** — start each in its own
+terminal (or its own `tmux` window):
 
 ```bash
-./run.sh                # API on :8000, UI on :8501
-./run.sh --api-only     # just the API (use this for a systemd unit)
-./run.sh --ui-only      # just the UI, against an API elsewhere
+# terminal 1 - the API
+python -m backend.main
+
+# terminal 2 - the UI
+streamlit run streamlit_app/app.py
 ```
 
-Open the UI at `http://<server-ip>:8501`, and the API docs at
-`http://<server-ip>:8000/docs`. `run.sh` prints both URLs on startup.
+Open the UI at `http://<server-ip>:8501` and the API docs at
+`http://<server-ip>:8000/docs`.
 
-Equivalent by hand:
+Both commands are self-configuring:
 
-```bash
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
-python -m streamlit run streamlit_app/app.py --server.port 8501
-```
+- `python -m backend.main` reads `HOST` and `PORT` from `.env`
+  (defaults `0.0.0.0:8000`), and never enables auto-reload.
+- `streamlit run` reads `.streamlit/config.toml` for address `0.0.0.0`,
+  port `8501`, headless mode and the upload size cap.
+- The UI finds the API at `http://127.0.0.1:8000` by default. Override with
+  `THEME_ANALYTICS_API_URL` if the API is on another host or port.
+
+`Ctrl+C` stops whichever process that terminal owns. They are genuinely
+independent: **stopping the UI does not stop the API**, and the API is the
+one holding Whisper in GPU memory — stop it in its own terminal too, or
+`pgrep -f backend.main` will still find it.
 
 Two things that bite:
 
@@ -147,14 +157,22 @@ later. It reaches the backend over HTTP only and holds no pipeline logic.
 | Env var | Default | Purpose |
 |---|---|---|
 | `THEME_ANALYTICS_API_URL` | `http://127.0.0.1:8000` | Where the UI finds the API |
-| `THEME_ANALYTICS_POLL_SECONDS` | `3` | Refresh interval while a batch runs |
 | `THEME_ANALYTICS_PREVIEW_CHARS` | `600` | Transcript characters in the table |
-| `UI_PORT` | `8501` | Streamlit port (read by `run.sh`) |
+| Streamlit port | `8501` | Set in `.streamlit/config.toml`, or `--server.port` |
 
-Streamlit has no push channel, so live progress is a timed rerun rather than
-the SSE stream. The `/jobs/{id}/events` endpoint is still there and still
-works — it's just for API consumers now. The refresh is a checkbox, on by
-default, and only appears while a batch is actually running.
+**The page never reruns on its own.** There is no timer, no auto-refresh and
+no file watcher — every rerun is something you did: a button, a widget, or
+the browser's rerun shortcut (`R`). While a batch is processing, press
+Refresh to see progress.
+
+That is deliberate rather than a limitation. A timed rerun loop
+(`time.sleep` + `st.rerun`) blocks Streamlit's script thread, which makes
+`Ctrl+C` slow to take effect and leaves the process lingering — exactly the
+kind of stray process that keeps GPU memory pinned. Without it, `Ctrl+C`
+stops the UI immediately.
+
+The `/jobs/{id}/events` SSE endpoint is still there and still works; it is
+for API consumers now, not the UI.
 
 Raise `maxUploadSize` in `.streamlit/config.toml` (currently 2048 MB) if your
 batches are bigger than that — Streamlit buffers the whole upload in memory

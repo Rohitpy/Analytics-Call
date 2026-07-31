@@ -18,9 +18,8 @@ class UiSettings:
     api_base_url: str = "http://127.0.0.1:8000"
     api_prefix: str = "/api/v1"
 
-    # How often the page re-polls while a batch is still running. Streamlit has
-    # no push channel, so "live" progress is a timed rerun.
-    poll_seconds: float = 3.0
+    # No poll interval on purpose: the page never reruns on a timer. Progress
+    # is refreshed only when the user asks for it.
 
     request_timeout: float = 30.0
     # Uploads can be hundreds of megabytes over a slow link.
@@ -57,7 +56,6 @@ def get_ui_settings() -> UiSettings:
     return UiSettings(
         api_base_url=os.getenv("THEME_ANALYTICS_API_URL", "").strip()
         or "http://127.0.0.1:8000",
-        poll_seconds=_float("THEME_ANALYTICS_POLL_SECONDS", 3.0),
         request_timeout=_float("THEME_ANALYTICS_REQUEST_TIMEOUT", 30.0),
         upload_timeout=_float("THEME_ANALYTICS_UPLOAD_TIMEOUT", 900.0),
         transcript_preview_chars=_int("THEME_ANALYTICS_PREVIEW_CHARS", 600),
