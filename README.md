@@ -5,8 +5,9 @@ transcribed with Whisper large-v3, translated to English when it is not already
 English, and classified by an LLM into a **theme**, a **specific issue**, and
 the **reason for that issue** — then written to Excel.
 
-Everything is an API. The browser UI is a client of the same endpoints
-documented at `/docs`; it has no privileged access.
+Everything is an API. The Streamlit UI is a client of the same endpoints
+documented at `/docs`; it has no privileged access and runs as its own
+process, so it can sit on a different host from the GPU box entirely.
 
 ---
 
@@ -69,8 +70,18 @@ backend/
     classification.yaml   stage 3 prompt
   data/
     themes.yaml           THE TAXONOMY — see "Tuning the classifier"
-frontend/
-  index.html  styles.css  app.js      no build step, no dependencies
+streamlit_app/                        the UI - a pure API client, own process
+  app.py                  entry point, tabs, timed refresh
+  config.py               API URL and poll interval (env-driven)
+  api_client.py           thin wrapper over the REST API
+  formatting.py           table shaping - no streamlit import, so it is testable
+  views/
+    sidebar.py            health, upload form, batch picker
+    job_panel.py          status, counters, progress, download/cancel/delete
+    report.py             the six report columns + theme rollup
+    call_detail.py        classification, evidence, both transcripts
+    taxonomy.py           browse themes, hot-reload themes.yaml
+.streamlit/config.toml                headless mode, upload size cap, theme
 storage/                              uploads, work, results, jobs, logs
 app.py                                the original script, kept for reference
 ```
@@ -97,20 +108,57 @@ LLM_BASE_URL=http://localhost:8003/v1
 LLM_MODEL=gemma-4
 ```
 
-Run it:
+Run it — this starts **two** processes, the API and the Streamlit UI:
 
 ```bash
-./run.sh                                    # or:
-python -m backend.main
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
+./run.sh                # API on :8000, UI on :8501
+./run.sh --api-only     # just the API (use this for a systemd unit)
+./run.sh --ui-only      # just the UI, against an API elsewhere
 ```
 
-Then open <http://localhost:8000> for the UI, or `/docs` for the API.
+Open the UI at `http://<server-ip>:8501`, and the API docs at
+`http://<server-ip>:8000/docs`. `run.sh` prints both URLs on startup.
+
+Equivalent by hand:
+
+```bash
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
+python -m streamlit run streamlit_app/app.py --server.port 8501
+```
+
+Two things that bite:
 
 > **Use a single uvicorn worker.** Job state and the queue live in the
 > process. Running `--workers 4` would give you four independent queues that
 > cannot see each other's jobs. Scale with `PIPELINE_WORKERS`, not with
 > uvicorn workers — see [Scaling out](#scaling-out).
+
+> **Open port 8501, not just 8000.** The UI is what people use; the API port
+> only needs to be reachable from wherever Streamlit runs. If they share a
+> box, `THEME_ANALYTICS_API_URL` defaults to `http://127.0.0.1:8000` and the
+> API can stay on loopback.
+
+### The UI
+
+Streamlit, targeting **1.30** (the version on the deployment box) — so no
+`st.fragment`, `st.dialog`, or dataframe row-selection, all of which landed
+later. It reaches the backend over HTTP only and holds no pipeline logic.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `THEME_ANALYTICS_API_URL` | `http://127.0.0.1:8000` | Where the UI finds the API |
+| `THEME_ANALYTICS_POLL_SECONDS` | `3` | Refresh interval while a batch runs |
+| `THEME_ANALYTICS_PREVIEW_CHARS` | `600` | Transcript characters in the table |
+| `UI_PORT` | `8501` | Streamlit port (read by `run.sh`) |
+
+Streamlit has no push channel, so live progress is a timed rerun rather than
+the SSE stream. The `/jobs/{id}/events` endpoint is still there and still
+works — it's just for API consumers now. The refresh is a checkbox, on by
+default, and only appears while a batch is actually running.
+
+Raise `maxUploadSize` in `.streamlit/config.toml` (currently 2048 MB) if your
+batches are bigger than that — Streamlit buffers the whole upload in memory
+before forwarding it, and its own default cap is 200 MB.
 
 ### Developing without a GPU
 
@@ -291,7 +339,7 @@ around it:
 | translation only | translation + theme/issue/reason classification |
 | prompt in a string literal | YAML prompts + hot-reloadable taxonomy |
 | `filename / transcription / translation` | the six-column report + 2 sheets |
-| `print(json.dumps(...))` | REST API, SSE progress, and a UI |
+| `print(json.dumps(...))` | REST API + a Streamlit UI |
 
 One latent bug is worth mentioning since it survives in `app.py`:
 `JSONToSRTTranslator.load_prompt_from_yaml` calls `yaml.safe_load` but the

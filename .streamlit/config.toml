@@ -1,0 +1,25 @@
+[server]
+# Headless: never try to open a browser, and skip the first-run email prompt.
+# Both matter when this starts from a script on a server.
+headless = true
+address = "0.0.0.0"
+port = 8501
+
+# Streamlit buffers uploads in memory before forwarding them to the API, and
+# its default cap is 200 MB for the whole request. A batch of call recordings
+# goes well past that. Raise it to match your largest expected batch.
+maxUploadSize = 2048
+
+# The upload POST and the timed reruns both need the websocket to stay up.
+enableWebsocketCompression = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#1f3864"
+
+[client]
+# Show errors in the page rather than only in the server log.
+showErrorDetails = true

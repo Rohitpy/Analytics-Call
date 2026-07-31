@@ -26,6 +26,14 @@ PyYAML>=6.0 ; python_version >= "3.9"
 # ---- LLM client ------------------------------------------------------------
 openai>=1.40.0              # verified: 2.45.0  (AsyncOpenAI, vLLM-compatible)
 
+# ---- UI (streamlit_app/) ---------------------------------------------------
+# Runs as its own process and reaches the backend over HTTP only. The code
+# targets the 1.30 API - no st.fragment / st.dialog / dataframe row-selection,
+# all of which arrived after 1.30.
+streamlit>=1.30.0           # verified: 1.30.0
+requests>=2.27.0            # a streamlit dependency; used by the API client
+pandas>=1.3.0               # a streamlit dependency; used for the tables
+
 # ---- reporting -------------------------------------------------------------
 openpyxl>=3.1.2             # verified: 3.1.5
 

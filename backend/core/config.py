@@ -105,10 +105,6 @@ class Settings(BaseSettings):
     def themes_file(self) -> Path:
         return BASE_DIR / "backend" / "data" / "themes.yaml"
 
-    @property
-    def frontend_dir(self) -> Path:
-        return BASE_DIR / "frontend"
-
     # ---- parsed helpers ----------------------------------------------------
     @property
     def allowed_extensions(self) -> set[str]:

@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from backend import __version__
 from backend.api.v1.router import api_router
@@ -66,19 +65,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.API_PREFIX)
 
-    # The SPA is mounted last: it claims "/", so anything it shadows would win
-    # over routes registered after it.
-    frontend_dir = settings.frontend_dir
-    if frontend_dir.is_dir():
-        app.mount(
-            "/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend"
-        )
-        logger.info("Serving the frontend from %s", frontend_dir)
-    else:
-
-        @app.get("/", include_in_schema=False)
-        async def _root() -> RedirectResponse:
-            return RedirectResponse("/docs")
+    # The UI is a separate Streamlit process (streamlit_app/), so this service
+    # serves the API only. "/" goes to the docs rather than 404ing.
+    @app.get("/", include_in_schema=False)
+    async def _root() -> RedirectResponse:
+        return RedirectResponse("/docs")
 
     return app
 

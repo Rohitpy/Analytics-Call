@@ -19,9 +19,25 @@ from backend.services.prompt_builder import PromptLibrary, build_translation_mes
 
 logger = get_logger(__name__)
 
-# Arabic, Arabic Supplement, Extended-A, and the presentation-form blocks.
+# Arabic, Arabic Supplement, Extended-A, and the two presentation-form blocks.
+#
+# Written as \u escapes on purpose: spelling the ranges with literal Arabic
+# characters makes this line's meaning depend on the file's encoding surviving
+# every copy, editor and terminal in between. It does not - one re-encode and
+# the character class breaks with "unterminated character set". Keeping the
+# source pure ASCII removes the failure mode.
+#
+# Note the last range stops at FEFC, the final Arabic ligature. U+FEFD..U+FEFF
+# are not letters (U+FEFF is the byte-order mark), so counting them as Arabic
+# would skew the ratio below.
 _ARABIC = re.compile(
-    r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]"
+    "["
+    "\u0600-\u06ff"  # Arabic
+    "\u0750-\u077f"  # Arabic Supplement
+    "\u08a0-\u08ff"  # Arabic Extended-A
+    "\ufb50-\ufdff"  # Arabic Presentation Forms-A
+    "\ufe70-\ufefc"  # Arabic Presentation Forms-B (letters only)
+    "]"
 )
 _LATIN = re.compile(r"[A-Za-z]")
 
