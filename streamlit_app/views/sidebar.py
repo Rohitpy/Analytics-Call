@@ -11,12 +11,11 @@ from streamlit_app.formatting import fmt_timestamp, status_badge
 
 def render(api: ApiClient, settings: UiSettings) -> None:
     with st.sidebar:
-        st.title(settings.page_title)
-        _readiness(api)
-        st.divider()
         _upload(api, settings)
         st.divider()
         _job_picker(api)
+        st.divider()
+        _readiness(api)
 
 
 # --------------------------------------------------------------------------

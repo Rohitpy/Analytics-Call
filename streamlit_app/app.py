@@ -56,7 +56,6 @@ def init_state() -> None:
 
 
 def render_welcome() -> None:
-    st.title("Theme Analytics")
     st.markdown(
         """
 Upload call recordings in the sidebar. Each call is:
@@ -78,6 +77,13 @@ def main() -> None:
     api = ApiClient(SETTINGS.api_url, timeout=SETTINGS.request_timeout)
 
     sidebar.render(api, SETTINGS)
+
+    # A static heading, not user input, so the hardcoded markup is safe as-is.
+    # st.title() has no alignment option, hence the raw <h1>.
+    st.markdown(
+        "<h1 style='text-align: center;'>Theme Analytics</h1>",
+        unsafe_allow_html=True,
+    )
 
     job_id = st.session_state.get("selected_job")
     if not job_id:
