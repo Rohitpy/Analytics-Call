@@ -72,15 +72,27 @@ async def readiness(container: ContainerDep, settings: SettingsDep) -> Readiness
     if not taxonomy.is_loaded:
         details["taxonomy"] = taxonomy.load_error or "using the built-in fallback"
 
-    stt_loaded = container.transcription.model_loaded
+    transcription = container.transcription
+    stt_loaded = transcription.model_loaded
     if not stt_loaded and settings.STT_BACKEND.lower() != "mock":
-        details["stt"] = "model not loaded yet - it loads on the first call"
+        if transcription.loaded_count == 0:
+            details["stt"] = "no instance loaded - it loads on the first call"
+        else:
+            # Partial load means one card failed; the rest still work.
+            details["stt"] = (
+                f"{transcription.loaded_count}/{transcription.instance_count} "
+                f"instances loaded across {', '.join(transcription.devices)}"
+            )
 
     ready = ffmpeg_available and llm_reachable and taxonomy.is_loaded
     return ReadinessResponse(
         status="ready" if ready else "degraded",
         stt_backend=settings.STT_BACKEND,
         stt_model_loaded=stt_loaded,
+        stt_mode="multi" if settings.is_multi_gpu else "single",
+        stt_devices=transcription.devices,
+        stt_instances=transcription.instance_count,
+        stt_instances_loaded=transcription.loaded_count,
         llm_base_url=settings.LLM_BASE_URL,
         llm_reachable=llm_reachable,
         llm_model=llm_model or settings.LLM_MODEL or None,

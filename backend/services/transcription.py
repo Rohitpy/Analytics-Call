@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
 import threading
 import time
 from collections import Counter
@@ -43,10 +44,23 @@ class TranscriberBackend(Protocol):
 # Whisper large-v3
 # ==========================================================================
 class WhisperTranscriber:
-    """Ported from app.py. Runs on the STT thread pool - never on the loop."""
+    """One Whisper model on one device. Runs on an STT thread, never on the loop.
 
-    def __init__(self, settings: Settings):
+    Exactly one transcription may run against a given instance at a time, and
+    that is correctness rather than tuning: whisper's decoder calls
+    `model.install_kv_cache_hooks()`, which registers forward hooks on this
+    model's attention modules and tears them down again in `cleanup_caching()`.
+    Two concurrent decodes on one instance would write into each other's KV
+    cache, and whichever finished first would remove the other's hooks
+    mid-decode.
+
+    Parallelism therefore comes from having several instances - one per GPU -
+    never from several threads sharing one. See TranscriptionService.
+    """
+
+    def __init__(self, settings: Settings, device: str | None = None):
         self._settings = settings
+        self.device = device or settings.WHISPER_DEVICE
         self.chunk_duration = settings.CHUNK_DURATION
         self.silence_pad = settings.SILENCE_PAD
         self.target_sample_rate = settings.TARGET_SAMPLE_RATE
@@ -74,7 +88,7 @@ class WhisperTranscriber:
             from silero_vad import load_silero_vad
 
             self._np = np
-            device = torch.device(self._settings.WHISPER_DEVICE)
+            device = torch.device(self.device)
             model_ref = self._settings.WHISPER_MODEL_PATH
 
             logger.info("Loading Whisper '%s' on %s ...", model_ref, device)
@@ -83,9 +97,13 @@ class WhisperTranscriber:
                 torch.cuda.empty_cache()
 
             self._model = whisper.load_model(model_ref, device=device)
+            # silero VAD is small and CPU-side; each instance gets its own so
+            # nothing is shared between devices.
             self._vad_model = load_silero_vad()
             logger.info(
-                "Whisper + silero VAD loaded in %.1fs", time.perf_counter() - started
+                "Whisper + silero VAD loaded on %s in %.1fs",
+                device,
+                time.perf_counter() - started,
             )
 
     # ---- utils -------------------------------------------------------------
@@ -385,16 +403,41 @@ def _empty_file_data(path: str, duration: float, fmt) -> dict[str, Any]:
 class TranscriptionService:
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._backend: TranscriberBackend = (
-            MockTranscriber(settings)
-            if settings.STT_BACKEND.lower() == "mock"
-            else WhisperTranscriber(settings)
-        )
-        # max_workers == STT_CONCURRENCY is what actually bounds GPU usage;
-        # everything else queues here instead of fighting for VRAM.
+        # One instance per device. STT_MODE=single gives exactly one, which is
+        # byte-for-byte the original behaviour; STT_MODE=multi gives one per
+        # entry in WHISPER_DEVICES.
+        #
+        # STT_CONCURRENCY is instances PER DEVICE. Separate instances have
+        # separate models and separate KV-cache hooks, so several on one card
+        # is safe - unlike several threads sharing one instance, which is not.
+        if settings.STT_BACKEND.lower() == "mock":
+            self._devices = ["mock"]
+            self._instances: list[TranscriberBackend] = [MockTranscriber(settings)]
+        else:
+            self._devices = settings.whisper_devices
+            per_device = max(1, settings.STT_CONCURRENCY)
+            self._instances = [
+                WhisperTranscriber(settings, device=device)
+                for device in self._devices
+                for _ in range(per_device)
+            ]
+
+        # A checked-out instance is never handed to a second thread. The pool
+        # size equals the worker count, so a get() never blocks for long; the
+        # queue exists to make the one-decode-per-instance rule explicit.
+        self._pool: queue.Queue[TranscriberBackend] = queue.Queue()
+        for instance in self._instances:
+            self._pool.put(instance)
+
         self._executor = ThreadPoolExecutor(
-            max_workers=max(1, settings.STT_CONCURRENCY),
+            max_workers=len(self._instances),
             thread_name_prefix="stt",
+        )
+        logger.info(
+            "STT mode=%s devices=%s instances=%d",
+            "multi" if settings.is_multi_gpu else "single",
+            ",".join(self._devices),
+            len(self._instances),
         )
 
     @property
@@ -402,25 +445,63 @@ class TranscriptionService:
         return self._settings.STT_BACKEND
 
     @property
+    def devices(self) -> list[str]:
+        return list(self._devices)
+
+    @property
+    def instance_count(self) -> int:
+        return len(self._instances)
+
+    @property
+    def loaded_count(self) -> int:
+        return sum(1 for instance in self._instances if instance.is_loaded())
+
+    @property
     def model_loaded(self) -> bool:
-        return self._backend.is_loaded()
+        """True only when every instance is ready to take work."""
+        return all(instance.is_loaded() for instance in self._instances)
 
     async def warmup(self) -> None:
-        """Pay the model-load cost at startup instead of on the first call."""
+        """Pay the model-load cost at startup instead of on the first call.
+
+        All devices load in parallel - the pool has one worker per instance,
+        so N GPUs warm up in roughly the time one would take.
+        """
         if not self._settings.STT_WARMUP:
             return
         loop = asyncio.get_running_loop()
+        results = await asyncio.gather(
+            *(
+                loop.run_in_executor(self._executor, instance.load)
+                for instance in self._instances
+            ),
+            return_exceptions=True,
+        )
+        for instance, result in zip(self._instances, results):
+            if isinstance(result, BaseException):
+                # A dead GPU should degrade /health/ready and take that one
+                # device out of use, not stop the API or the other devices.
+                logger.error(
+                    "STT warmup failed on %s: %s",
+                    getattr(instance, "device", "?"),
+                    result,
+                )
+        if self._instances and self.loaded_count == 0:
+            logger.error("No STT instance loaded - transcription will fail per call")
+
+    def _transcribe_sync(self, wav_path: Path) -> dict[str, Any]:
+        """Runs on an STT thread. Borrows one instance for the whole call."""
+        instance = self._pool.get()
         try:
-            await loop.run_in_executor(self._executor, self._backend.load)
-        except Exception:
-            # A missing GPU should degrade /health/ready, not stop the API.
-            logger.exception("STT warmup failed - transcription will error per call")
+            return instance.transcribe_file(wav_path)
+        finally:
+            self._pool.put(instance)
 
     async def transcribe(self, wav_path: Path, json_out: Path | None = None) -> TranscriptionResult:
         loop = asyncio.get_running_loop()
         try:
             data = await loop.run_in_executor(
-                self._executor, self._backend.transcribe_file, wav_path
+                self._executor, self._transcribe_sync, wav_path
             )
         except StageError:
             raise

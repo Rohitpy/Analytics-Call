@@ -25,12 +25,49 @@ inference server never fight each other:
 | Stage | Bounded by | Default |
 |---|---|---|
 | ffmpeg | subprocess, naturally parallel | — |
-| Whisper | `STT_CONCURRENCY` (thread pool) | 1 |
+| Whisper | one instance per device × `STT_CONCURRENCY` | 1 instance |
 | translate + classify | `LLM_MAX_CONCURRENCY` (semaphore) | 8 |
 | calls in flight | `PIPELINE_WORKERS` | 4 |
 
-`PIPELINE_WORKERS` can safely exceed `STT_CONCURRENCY`: while one call sits on
-the GPU, the others are waiting on the LLM.
+`PIPELINE_WORKERS` can safely exceed the STT capacity: while one call sits on
+a GPU, the others are waiting on the LLM.
+
+### Single vs multi-GPU transcription
+
+```ini
+# one card (default, unchanged)
+STT_MODE=single
+WHISPER_DEVICE=cuda:0
+
+# several cards - one Whisper instance on each
+STT_MODE=multi
+WHISPER_DEVICES=cuda:4,cuda:5,cuda:6,cuda:7
+STT_CONCURRENCY=1        # instances PER device
+```
+
+Total parallel transcriptions = `len(WHISPER_DEVICES) × STT_CONCURRENCY`.
+`"cuda1"`, `"cuda:1"` and `"1"` are all accepted; duplicates are dropped. If
+`STT_MODE=multi` but the list is empty, it falls back to `WHISPER_DEVICE`
+rather than starting with no transcriber.
+
+**Why instances and not threads.** Whisper's decoder calls
+`model.install_kv_cache_hooks()`, which registers forward hooks on *that
+model's* attention modules and removes them in `cleanup_caching()`. Two
+concurrent decodes sharing one model instance would write into each other's KV
+cache, and whichever finished first would tear down the other's hooks
+mid-decode — corrupt transcripts, not just a slowdown. So each instance takes
+exactly one call at a time, and parallelism comes from having more instances.
+A `queue.Queue` of instances enforces that; `STT_CONCURRENCY` > 1 creates
+*additional independent instances* on a card, which is safe.
+
+Raising `STT_CONCURRENCY` above 1 is only worth it if `nvidia-smi` shows the
+cards under-utilised — one `large-v3` decode with `beam_size=5, best_of=5`
+already keeps a smaller GPU busy, though it will not saturate an 80–140 GB
+card. Each extra instance costs ~3 GB of weights.
+
+All devices warm up in parallel at startup, so N cards load in about the time
+one would take. If one card fails to load, the others keep working and
+`/health/ready` reports `stt_instances_loaded` below `stt_instances`.
 
 ---
 

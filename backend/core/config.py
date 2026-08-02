@@ -6,6 +6,7 @@ environment. Nothing else in the codebase reads `os.getenv` directly.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -50,7 +51,14 @@ class Settings(BaseSettings):
     # ---- speech to text ----------------------------------------------------
     STT_BACKEND: str = "whisper"  # "whisper" | "mock"
     WHISPER_MODEL_PATH: str = "/data0/genaiadm_bkp/GenAi-LLM/whisper/large-v3.pt"
+
+    # "single" -> one Whisper instance on WHISPER_DEVICE (the original behaviour)
+    # "multi"  -> one instance per device listed in WHISPER_DEVICES
+    STT_MODE: str = "single"
     WHISPER_DEVICE: str = "cuda:0"
+    # Only read when STT_MODE=multi. Comma separated, e.g. "cuda:1,cuda:4,cuda:5".
+    # Bare numbers and "cuda1" are accepted and normalised to "cuda:1".
+    WHISPER_DEVICES: str = ""
     WHISPER_LANGUAGE: str = "ar"
     WHISPER_INITIAL_PROMPT: str = ""
     STT_CONCURRENCY: int = 1
@@ -107,6 +115,31 @@ class Settings(BaseSettings):
 
     # ---- parsed helpers ----------------------------------------------------
     @property
+    def is_multi_gpu(self) -> bool:
+        return self.STT_MODE.strip().lower() in ("multi", "multiple")
+
+    @property
+    def whisper_devices(self) -> list[str]:
+        """The devices to load Whisper onto.
+
+        single -> [WHISPER_DEVICE]
+        multi  -> WHISPER_DEVICES, de-duplicated, order preserved. Falls back
+                  to WHISPER_DEVICE if the list is empty or unusable, so a
+                  misconfigured multi setup degrades to working single-GPU
+                  rather than starting with no transcriber at all.
+        """
+        if not self.is_multi_gpu:
+            return [normalise_device(self.WHISPER_DEVICE)]
+
+        seen: list[str] = []
+        for raw in self.WHISPER_DEVICES.split(","):
+            device = normalise_device(raw)
+            if device and device not in seen:
+                seen.append(device)
+        return seen or [normalise_device(self.WHISPER_DEVICE)]
+
+
+    @property
     def allowed_extensions(self) -> set[str]:
         return {
             ext.strip().lower() if ext.strip().startswith(".") else f".{ext.strip().lower()}"
@@ -136,6 +169,26 @@ class Settings(BaseSettings):
             self.log_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
+
+
+_CUDA_INDEX = re.compile(r"^cuda:?(\d+)$", re.IGNORECASE)
+
+
+def normalise_device(raw: str) -> str:
+    """Accept the forms people actually type and return a torch-valid string.
+
+    "cuda:1" / "cuda1" / " 1 " -> "cuda:1";  "cpu" and anything else pass
+    through unchanged so mps/xpu still work.
+    """
+    device = (raw or "").strip()
+    if not device:
+        return ""
+    if device.isdigit():
+        return f"cuda:{int(device)}"
+    match = _CUDA_INDEX.match(device)
+    if match:
+        return f"cuda:{int(match.group(1))}"
+    return device.lower() if device.lower() in ("cpu", "cuda", "mps") else device
 
 
 @lru_cache(maxsize=1)

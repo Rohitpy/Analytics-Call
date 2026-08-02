@@ -77,6 +77,10 @@ class ReadinessResponse(BaseModel):
     status: str = Field(description='"ready" | "degraded"')
     stt_backend: str
     stt_model_loaded: bool
+    stt_mode: str = Field(default="single", description='"single" | "multi"')
+    stt_devices: list[str] = Field(default_factory=list)
+    stt_instances: int = 0
+    stt_instances_loaded: int = 0
     llm_base_url: str
     llm_reachable: bool
     llm_model: str | None = None

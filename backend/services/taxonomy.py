@@ -99,12 +99,19 @@ class TaxonomyService:
                     )
                 issue_seen.add(ikey)
 
-        if taxonomy.fallback_theme and not any(
+        # fallback_theme is deliberately allowed to be OUTSIDE the themes list -
+        # it is a label for system-generated rows (no speech detected, or a
+        # defensive catch if the model's answer cannot be matched at all), not
+        # a choice the model itself is ever offered. See classification.yaml.
+        if taxonomy.fallback_theme and any(
             t.name.strip().lower() == taxonomy.fallback_theme.strip().lower()
             for t in taxonomy.themes
         ):
-            raise ValueError(
-                f"fallback_theme '{taxonomy.fallback_theme}' is not defined in themes"
+            logger.warning(
+                "fallback_theme '%s' matches a real theme name - the model "
+                "may pick it directly during normal classification, which is "
+                "probably not intended for a fallback/system label.",
+                taxonomy.fallback_theme,
             )
 
     # ---- accessors ---------------------------------------------------------

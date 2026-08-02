@@ -129,8 +129,6 @@ def build_classification_messages(
         "domain": taxonomy.domain or "a retail bank contact centre",
         "taxonomy": build_taxonomy_block(taxonomy),
         "theme_list": "\n".join(f"  - {n}" for n in taxonomy.theme_names()),
-        "fallback_theme": taxonomy.fallback_theme,
-        "fallback_issue": taxonomy.fallback_issue,
         "transcript": truncate_transcript(transcript.strip()),
         "filename": filename,
     }

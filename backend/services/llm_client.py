@@ -13,6 +13,7 @@ services stay declarative:
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import time
 from typing import Any
@@ -107,6 +108,8 @@ class LLMClient:
         if guided_json and settings.LLM_USE_GUIDED_JSON:
             kwargs["extra_body"] = {"guided_json": guided_json}
 
+        _log_prompt(stage, model, kwargs)
+
         last_error: Exception | None = None
         for attempt in range(1, settings.LLM_MAX_RETRIES + 1):
             started = time.perf_counter()
@@ -125,6 +128,7 @@ class LLMClient:
                     elapsed,
                     len(text),
                 )
+                _log_response(stage, text)
                 if not text.strip():
                     raise StageError(stage, "LLM returned an empty response.")
                 return text
@@ -186,3 +190,52 @@ class LLMClient:
 
     async def aclose(self) -> None:
         await self._client.close()
+
+
+# --------------------------------------------------------------------------
+# Prompt / response debug logging
+#
+# Off by default (DEBUG is below the default INFO level) so a normal run's
+# logs stay readable and don't leak full transcripts. Turn it on with:
+#
+#   LOG_LEVEL=DEBUG python -m backend.main
+#
+# or, to avoid re-exporting every INFO line from every other module too, set
+# just this logger from Python before starting the app:
+#
+#   import logging
+#   logging.getLogger("backend.services.llm_client").setLevel(logging.DEBUG)
+#
+# Every line is prefixed "PROMPT>" / "RESPONSE>" so `grep "PROMPT>"` isolates
+# them from the rest of the log even at DEBUG level.
+# --------------------------------------------------------------------------
+def _log_prompt(stage: str, model: str, kwargs: dict[str, Any]) -> None:
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    messages = kwargs.get("messages", [])
+    lines = [
+        "",
+        "=" * 88,
+        f"PROMPT> stage={stage} model={model} temperature={kwargs.get('temperature')} "
+        f"max_tokens={kwargs.get('max_tokens')} "
+        f"guided_json={'yes' if 'extra_body' in kwargs else 'no'}",
+        "=" * 88,
+    ]
+    for message in messages:
+        role = message.get("role", "?")
+        content = message.get("content", "")
+        lines.append(f"PROMPT> --- {role} " + "-" * (78 - len(role)))
+        lines.append(content if isinstance(content, str) else str(content))
+    lines.append("=" * 88)
+    logger.debug("\n".join(lines))
+
+
+def _log_response(stage: str, text: str) -> None:
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    logger.debug(
+        "\nRESPONSE> stage=%s\nRESPONSE> " + "-" * 78 + "\n%s\nRESPONSE> " + "=" * 78,
+        stage,
+        text,
+    )
